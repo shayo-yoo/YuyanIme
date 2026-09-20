@@ -123,6 +123,30 @@ keyPassword=testPassword
 
 [![Star History Chart](https://api.star-history.com/svg?repos=gurecn/YuyanIme&type=Date)](https://star-history.com/#gurecn/YuyanIme&Date)
 
+## 语音识别（说点啥 BiDi）与热词库
 
+本分支在原版基础上新增：
 
+- **语音识别A / 语音识别B**：功能栏两个独立语音入口，可分别设置点按或长按录音（设置 → 输入法 → 语音识别）。
+- **说点啥（BiBi）联动**：需先安装说点啥并在其设置中开启对外接口/外部联动，配置识别引擎（推荐火山引擎）后使用。
+- **热词库引擎**：主配置 Documents/YuyanVoice/voice_config.txt，词库文件 wordbook_*.txt（[regex] 正则替换 + [hotword] 热词/近音替换）。
+- **热词库设置页**：设置 → 输入法 → 热词库设置，可逐库开关，直接回写 enabled_wordbooks。
+- **录音提示**：录音中功能栏麦克风图标变红。
 
+### 构建
+
+- JDK 17、Android SDK 36（build-tools 36.0.0）
+- Gradle 8.9（wrapper 已指向国内镜像；构建脚本已配置阿里云 Maven 镜像）
+- 调试签名：仓库自带 keystore/yuyan.jks（仅演示用途，密码见 keystore.properties）
+- 构建命令：gradlew :app:assembleDebug，产物在 app/build/outputs/apk/offline/debug/
+
+### 文件格式（Documents/YuyanVoice/voice_config.txt）
+
+# 语音总开关
+enable_voice = true
+# 交互：tap=点按 hold=按住录音（interact_mode_a/b 可分别作用于A/B按钮）
+interact_mode = tap
+# 发音相似度阈值 0~1
+similarity_threshold = 0.8
+# 启用词库（wordbook_*.txt 去掉前缀，逗号分隔，顺序即优先级）
+enabled_wordbooks = default,tech
