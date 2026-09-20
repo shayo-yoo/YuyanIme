@@ -23,6 +23,9 @@
     <string name="hotword_settings_tips">词库文件位于手机“文档”目录下的 YuyanVoice 文件夹：voice_config.txt 为主配置，wordbook_*.txt 为各词库。勾选/取消下方词库会直接写入 voice_config.txt 的 enabled_wordbooks；修改后下次启动输入法生效（也可直接编辑该文件）。</string>
     <string name="hotword_scan">扫描词库</string>
     <string name="hotword_create_default">创建默认目录与示例词库</string>
+    <string name="hotword_restart">重启程序（应用新替换规则）</string>
+    <string name="hotword_restarting">正在重启…</string>
+    <string name="hotword_restart_failed">重启失败，请手动重启输入法</string>
     <string name="hotword_dir_missing">未找到 YuyanVoice 目录。请先在手机“文档”目录创建 YuyanVoice 文件夹并放入词库文件（Android 11+ 需在系统设置授予“所有文件访问”权限）。</string>
     <string name="hotword_empty">YuyanVoice 目录下没有找到词库文件，请放入 wordbook_*.txt。</string>
     <string name="hotword_saved">已保存（下次启动输入法生效）</string>

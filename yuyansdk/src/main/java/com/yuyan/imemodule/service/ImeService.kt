@@ -191,23 +191,18 @@ class ImeService : InputMethodService() {
                 } else {
                     contentTopInsets = y
                     visibleTopInsets = y
-                    // 只让键盘区域可触摸：否则整个屏幕都是 IME 窗口的触摸区，
-                    // 会吞掉屏幕边缘的“返回手势”（从左右边缘向中心滑动）。
-                    val kbdW = mInputView.mSkbRoot.width
-                    val kbdH = mInputView.mSkbRoot.height
-                    if (kbdW > 0 && kbdH > 0) {
-                        touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-                        touchableRegion.set(x, y, x + kbdW, y + kbdH)
-                    } else {
-                        touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
-                        touchableRegion.setEmpty()
-                    }
+                    // 关键：必须用 TOUCHABLE_INSETS_VISIBLE（系统标准输入法行为，Gboard 亦如此）。
+                    // 系统会根据 visibleTopInsets 把 IME 窗口的触摸区限制在“键盘可见区”，
+                    // 键盘以外的屏幕边缘（左右返回手势区域）属于应用窗口，手势返回才能正常触发。
+                    // 用 TOUCHABLE_INSETS_CONTENT 会让整个屏幕都归 IME 触摸，边缘滑动全被吞掉。
+                    touchableInsets = Insets.TOUCHABLE_INSETS_VISIBLE
+                    touchableRegion.setEmpty()
                 }
             } else if (isSoftKeyboard || !isHardwareKeyboard) {
-                // 输入视图尚未创建（系统可能在 onCreateInputView 前回调）：退回原行为，绝不访问未初始化视图
+                // 输入视图尚未创建（系统可能在 onCreateInputView 前回调）：退回安全默认值，绝不访问未初始化视图
                 contentTopInsets = y
                 visibleTopInsets = y
-                touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+                touchableInsets = Insets.TOUCHABLE_INSETS_VISIBLE
                 touchableRegion.setEmpty()
             } else if (isHardwareKeyboard && ::mCandidateView.isInitialized) {
                 contentTopInsets = EnvironmentSingleton.instance.mScreenHeight
@@ -218,7 +213,7 @@ class ImeService : InputMethodService() {
                 // 兜底：视图均未就绪时给安全默认值，绝不访问未初始化视图
                 contentTopInsets = EnvironmentSingleton.instance.mScreenHeight
                 visibleTopInsets = EnvironmentSingleton.instance.mScreenHeight
-                touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+                touchableInsets = Insets.TOUCHABLE_INSETS_VISIBLE
                 touchableRegion.setEmpty()
             }
         }

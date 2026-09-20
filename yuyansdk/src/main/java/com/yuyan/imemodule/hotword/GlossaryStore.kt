@@ -56,6 +56,10 @@ object GlossaryStore {
             if (!sample.isFile) {
                 sample.writeText(DEFAULT_WORDBOOK_TEXT)
             }
+            val readme = File(root, "README.md")
+            if (!readme.isFile) {
+                readme.writeText(DEFAULT_README_TEXT)
+            }
             root
         } catch (t: Throwable) {
             null
@@ -85,6 +89,79 @@ object GlossaryStore {
             "[hotword]",
             "回龙观 = 回笼灌 | 回龙灌 | 慧龙观",
             "语音识别 = 语音试别 | 语音设别"
+        ).joinToString("\n") + "\n"
+
+    private val DEFAULT_README_TEXT: String
+        get() = listOf(
+            "# YuyanVoice 语音热词库 —— 配置说明",
+            "",
+            "本目录存放雨燕输入法语音识别的替换规则。所有文件均为普通文本（UTF-8 编码），",
+            "用手机文件管理器或电脑记事本即可编辑。",
+            "",
+            "## 目录结构",
+            "",
+            "Documents/YuyanVoice/",
+            "├── README.md              本说明文件",
+            "├── voice_config.txt       主配置（开关、交互方式、相似度阈值、启用词库）",
+            "└── wordbook_*.txt         词库文件，文件名即词库名（可随意新增/删除）",
+            "",
+            "## 文件一：voice_config.txt（主配置）",
+            "",
+            "| 配置项 | 取值 | 说明 |",
+            "|---|---|---|",
+            "| enable_voice | true / false | 总开关，false 时语音按钮不识别 |",
+            "| interact_mode | tap / hold | 默认交互方式：tap=点按开始、再点结束；hold=按住录音、松开结束 |",
+            "| interact_mode_a | tap / hold | 只影响「语音识别A」按钮 |",
+            "| interact_mode_b | tap / hold | 只影响「语音识别B」按钮 |",
+            "| similarity_threshold | 0~1 小数 | 热词相似度阈值：0.8 表示与目标音相似度≥0.8 才替换；越低越宽松 |",
+            "| apply_order | regex,hotword | 应用顺序：先做正则替换，再做热词替换（可写 hotword,regex 反过来） |",
+            "| enabled_wordbooks | 词库名,词库名 | 启用的词库列表（不含 .txt 后缀）。留空=全部启用；全部停用写 _none_ |",
+            "",
+            "示例：",
+            "enable_voice = true",
+            "interact_mode = tap",
+            "similarity_threshold = 0.8",
+            "apply_order = regex,hotword",
+            "enabled_wordbooks = default,tech",
+            "",
+            "## 文件二：词库文件（wordbook_*.txt）",
+            "",
+            "一个文件 = 一个词库。文件里用 [段名] 分成两段：",
+            "",
+            "### [regex] 段：正则替换（精确，适合数字、英文、单位）",
+            "",
+            "格式：匹配模式 = 替换结果（一行一条，支持标准正则表达式；正则写错该行会被跳过）",
+            "",
+            "示例：",
+            "毫安时 = mAh",
+            "二零二四 = 2024",
+            "([0-9]+)点([0-9]+) = ${1}.${2}     # “3点14” → “3.14”",
+            "([0-9]+)千 = ${1}000            # “5千” → “5000”",
+            "",
+            "### [hotword] 段：近音热词（适合人名、地名、专业词）",
+            "",
+            "格式：规范词 = 别名1 | 别名2 | ...",
+            "说出的声音与“别名”相似度 ≥ similarity_threshold 时，自动替换成“规范词”。",
+            "",
+            "示例：",
+            "回龙观 = 回笼灌 | 回龙灌 | 慧龙观",
+            "语音识别 = 语音试别 | 语音设别",
+            "陈宝国 = 陈宝果 | 陈宝锅",
+            "",
+            "别名写得越多、越贴近口音，命中率越高；2~4 字的人名/地名效果最好。",
+            "",
+            "## 修改后如何生效",
+            "",
+            "1. 修改文件（或勾选/取消启用词库）后，必须重启雨燕输入法才会加载新规则；",
+            "2. 最快方式：输入法设置 → 热词库设置页 → 点「重启程序」按钮；",
+            "3. 或到系统设置里停用再启用雨燕输入法；",
+            "4. 语音识别 A/B 的开关与交互方式在配置读取后也一并生效，无需其它操作。",
+            "",
+            "## 注意事项",
+            "",
+            "- 请用 UTF-8 编码保存文件（手机文件管理器自带编辑器一般默认 UTF-8，电脑上别用记事本另存为 ANSI）；",
+            "- 一行只能一条规则，# 开头的行是注释；",
+            "- 词库文件数量不影响速度，但建议只保留常用词库。"
         ).joinToString("\n") + "\n"
 
     /** 从指定目录加载整套配置与词库；无配置/未开启/目录无效返回 null */

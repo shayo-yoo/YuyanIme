@@ -1,6 +1,8 @@
 package com.yuyan.imemodule.ui.fragment
 
+import android.content.Intent
 import android.os.Bundle
+import android.os.Process
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,6 +11,7 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import com.yuyan.imemodule.R
 import com.yuyan.imemodule.hotword.GlossaryStore
@@ -17,7 +20,8 @@ import splitties.dimensions.dp
 /**
  * 热词库设置页：列出 Documents/YuyanVoice 下的词库文件，
  * 勾选/取消即回写 voice_config.txt 的 enabled_wordbooks。
- * 说明：配置由文件驱动；修改后下次启动输入法（或下次语音输入重新加载引擎）生效。
+ * 说明：配置由文件驱动；修改后点「重启程序」按钮重启本进程（IME 服务同进程），
+ * 下次唤出键盘即自动加载新的替换规则。
  */
 class HotwordSettingsFragment : Fragment() {
 
@@ -57,6 +61,11 @@ class HotwordSettingsFragment : Fragment() {
                     statusText.text = getString(R.string.hotword_dir_missing)
                 }
             }
+        })
+
+        root.addView(Button(context).apply {
+            text = getString(R.string.hotword_restart)
+            setOnClickListener { restartApp() }
         })
 
         cbContainer = LinearLayout(context).apply {
@@ -123,5 +132,30 @@ class HotwordSettingsFragment : Fragment() {
         } else {
             statusText.text = getString(R.string.hotword_dir_missing)
         }
+    }
+
+    /**
+     * 重启本程序进程：设置页与 IME 服务同进程，重启后下次唤出键盘，
+     * 输入法会重新读取全部配置文件（替换规则、交互方式、启用词库），立即生效。
+     */
+    private fun restartApp() {
+        val ctx = requireContext()
+        val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        try {
+            ctx.startActivity(intent)
+        } catch (t: Throwable) {
+            Toast.makeText(ctx, getString(R.string.hotword_restart_failed), Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(ctx, getString(R.string.hotword_restarting), Toast.LENGTH_SHORT).show()
+        // 稍等片刻让系统接收重启意图，然后结束本进程，由系统拉起新进程
+        Thread {
+            try {
+                Thread.sleep(800)
+            } catch (_: InterruptedException) {
+            }
+            Process.killProcess(Process.myPid())
+        }.start()
     }
 }
