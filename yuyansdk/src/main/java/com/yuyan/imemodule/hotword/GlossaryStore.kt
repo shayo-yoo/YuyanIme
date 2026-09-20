@@ -32,6 +32,61 @@ object GlossaryStore {
         return candidates.firstOrNull { it.exists() && it.isDirectory() }
     }
 
+    /**
+     * 确保词库目录与默认文件存在（不存在则创建）。
+     * 首次使用时调用：自动建 Documents/YuyanVoice，并写入主配置 voice_config.txt
+     * 与示例词库 wordbook_default.txt，用户即可直接开始配置。
+     * @return 词库根目录；创建失败（如未授予存储权限）返回 null
+     */
+    fun ensureDefaultSetup(): File? {
+        val root = defaultRootDir() ?: run {
+            val docs = try {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            } catch (_: Throwable) { null }
+            val target = docs?.let { File(it, DIR_NAME) }
+            if (target == null || (!target.exists() && !target.mkdirs())) return null
+            target
+        }
+        return try {
+            val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)
+            if (!cfgFile.isFile) {
+                cfgFile.writeText(DEFAULT_CONFIG_TEXT)
+            }
+            val sample = File(root, "wordbook_default.txt")
+            if (!sample.isFile) {
+                sample.writeText(DEFAULT_WORDBOOK_TEXT)
+            }
+            root
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private val DEFAULT_CONFIG_TEXT: String
+        get() = listOf(
+            "# YuyanVoice 语音热词库主配置（自动创建）",
+            "# 词库文件放到本目录：Documents/YuyanVoice/",
+            "enable_voice = true",
+            "# 交互：tap=点按  hold=按住录音（interact_mode_a/b 可分别作用于语音识别A/B）",
+            "interact_mode = tap",
+            "similarity_threshold = 0.8",
+            "apply_order = regex,hotword",
+            "enabled_wordbooks = default"
+        ).joinToString("\n") + "\n"
+
+    private val DEFAULT_WORDBOOK_TEXT: String
+        get() = listOf(
+            "# 示例词库 wordbook_default.txt（自动创建）",
+            "# [regex] 段：正则规则，pattern = 替换结果",
+            "[regex]",
+            "毫安时 = mAh",
+            "",
+            "# [hotword] 段：规范词 = 别名1 | 别名2 | ...",
+            "[hotword]",
+            "回龙观 = 回笼灌 | 回龙灌 | 慧龙观",
+            "语音识别 = 语音试别 | 语音设别"
+        ).joinToString("\n") + "\n"
+
     /** 从指定目录加载整套配置与词库；无配置/未开启/目录无效返回 null */
     fun loadSuite(root: File): GlossarySuite? {
         val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)

@@ -47,6 +47,18 @@ class HotwordSettingsFragment : Fragment() {
             setOnClickListener { refresh() }
         })
 
+        root.addView(Button(context).apply {
+            text = getString(R.string.hotword_create_default)
+            setOnClickListener {
+                val created = GlossaryStore.ensureDefaultSetup()
+                if (created != null) {
+                    refresh()
+                } else {
+                    statusText.text = getString(R.string.hotword_dir_missing)
+                }
+            }
+        })
+
         cbContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(8), 0, 0)

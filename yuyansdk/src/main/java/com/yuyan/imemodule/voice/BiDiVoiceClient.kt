@@ -73,6 +73,29 @@ class BiDiVoiceClient(private val appContext: Context) {
 
     private var service: IExternalSpeechService? = null
 
+    /**
+     * 会话看门狗：说点啥退到后台/服务被杀时可能收不到 onFinal/onError，
+     * 导致 sessionActive 卡在 true、后续点击全部被忽略（表现为“只能识别一次”）。
+     * 只要一段时间内没有任何回调，就自动复位会话，让下一次点击能重新开始。
+     */
+    private val WATCHDOG_MS = 60_000L
+    private val watchdog = Runnable {
+        if (sessionActive.get()) {
+            sessionActive.set(false)
+            this@BiDiVoiceClient.sessionId.set(-1)
+            postState(VoiceState.Idle, "会话超时，已自动复位")
+        }
+    }
+
+    private fun armWatchdog() {
+        cancelWatchdog()
+        mainHandler.postDelayed(watchdog, WATCHDOG_MS)
+    }
+
+    private fun cancelWatchdog() {
+        mainHandler.removeCallbacks(watchdog)
+    }
+
     /** 绑定时可能已排队待执行的动作（服务连上后再补发） */
     private var pendingStart = false
     private var pendingStop = false
@@ -94,6 +117,7 @@ class BiDiVoiceClient(private val appContext: Context) {
         override fun onServiceDisconnected(name: ComponentName?) {
             bound.set(false)
             service = null
+            cancelWatchdog()
             if (sessionActive.get()) {
                 sessionActive.set(false)
                 this@BiDiVoiceClient.sessionId.set(-1)
@@ -111,16 +135,25 @@ class BiDiVoiceClient(private val appContext: Context) {
                 STATE_ERROR -> VoiceState.Error
                 else -> VoiceState.Recording
             }
+            if (s == VoiceState.Idle || s == VoiceState.Error) {
+                sessionActive.set(false)
+                this@BiDiVoiceClient.sessionId.set(-1)
+                cancelWatchdog()
+            } else {
+                armWatchdog() // 会话活跃中：只要还有动静就顺延
+            }
             postState(s, message)
         }
 
         override fun onPartial(sessionId: Int, text: String?) {
+            armWatchdog()
             // M1 暂不展示流式中间结果；后续版本可在候选栏流式预览
         }
 
         override fun onFinal(sessionId: Int, text: String?) {
             sessionActive.set(false)
             this@BiDiVoiceClient.sessionId.set(-1)
+            cancelWatchdog()
             if (!text.isNullOrBlank()) {
                 mainHandler.post { listener?.onVoiceFinal(text) }
             }
@@ -130,12 +163,14 @@ class BiDiVoiceClient(private val appContext: Context) {
         override fun onError(sessionId: Int, code: Int, message: String?) {
             sessionActive.set(false)
             this@BiDiVoiceClient.sessionId.set(-1)
+            cancelWatchdog()
             val msg = message ?: "识别错误($code)"
             mainHandler.post { listener?.onVoiceError(code, msg) }
             postState(VoiceState.Error, msg)
         }
 
         override fun onAmplitude(sessionId: Int, amplitude: Float) {
+            armWatchdog()
             mainHandler.post { listener?.onVoiceAmplitude(amplitude) }
         }
     }
@@ -153,6 +188,7 @@ class BiDiVoiceClient(private val appContext: Context) {
     }
 
     fun unbind() {
+        cancelWatchdog()
         if (bound.compareAndSet(true, false)) {
             try { appContext.unbindService(connection) } catch (_: Throwable) {}
         }
@@ -173,18 +209,31 @@ class BiDiVoiceClient(private val appContext: Context) {
 
     private fun startSession() {
         val svc = service ?: return
-        if (sessionActive.get()) return // 已在录音，忽略
+        val oldSid = sessionId.get()
+        if (sessionActive.get()) {
+            // 上一次会话可能因说点啥退后台/被杀而没有收到结束回调：先尽力取消旧会话再开新会话，
+            // 避免“只能识别一次”的卡死状态。
+            if (oldSid > 0) {
+                try { svc.cancelSession(oldSid) } catch (_: Throwable) {}
+            }
+            sessionActive.set(false)
+            sessionId.set(-1)
+        }
         try {
             val cfg = SpeechConfig(null, true, null, null, "yuyan_ime")
             val sid = svc.startSession(cfg, callback)
             if (sid > 0) {
                 sessionActive.set(true)
                 sessionId.set(sid)
+                armWatchdog()
                 postState(VoiceState.Starting, "started")
             } else {
                 serviceError(sid)
             }
         } catch (t: Throwable) {
+            // 死连接：复位绑定，下次点击自动重新绑定
+            bound.set(false)
+            service = null
             postError(-1000, "startSession 调用失败:${t.message}")
         }
     }
@@ -213,6 +262,7 @@ class BiDiVoiceClient(private val appContext: Context) {
         val sid = sessionId.get()
         pendingStart = false
         pendingStop = false
+        cancelWatchdog()
         if (sid > 0) {
             try { svc.cancelSession(sid) } catch (_: Throwable) {}
         }
@@ -227,6 +277,7 @@ class BiDiVoiceClient(private val appContext: Context) {
     private fun serviceError(errorCode: Int) {
         sessionActive.set(false)
         sessionId.set(-1)
+        cancelWatchdog()
         val msg = when (errorCode) {
             ERR_FEATURE_DISABLED -> "说点啥未开启“对外接口”（feature disabled）"
             ERR_BUSY -> "说点啥正忙（已有识别会话进行中）"

@@ -84,6 +84,11 @@ class ImeService : InputMethodService() {
         voiceController = VoiceController(baseContext) { text -> commitVoiceResult(text) }
         val (holdA, holdB) = GlossaryStore.voiceInteractModes()
         voiceController.applyConfig(holdA, holdB)
+        // 后台自动确保 Documents/YuyanVoice 目录与默认配置/示例词库存在（尽力而为，失败不影响使用）
+        try {
+            Thread { GlossaryStore.ensureDefaultSetup() }.start()
+        } catch (_: Throwable) {
+        }
     }
 
     override fun onCreateInputView(): View {
@@ -180,9 +185,18 @@ class ImeService : InputMethodService() {
                     touchableRegion.set(x, y, x + mInputView.mSkbRoot.width, y + mInputView.mSkbRoot.height)
                 } else {
                     contentTopInsets = y
-                    touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
-                    touchableRegion.setEmpty()
                     visibleTopInsets = y
+                    // 只让键盘区域可触摸：否则整个屏幕都是 IME 窗口的触摸区，
+                    // 会吞掉屏幕边缘的“返回手势”（从左右边缘向中心滑动）。
+                    val kbdW = mInputView.mSkbRoot.width
+                    val kbdH = mInputView.mSkbRoot.height
+                    if (kbdW > 0 && kbdH > 0) {
+                        touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+                        touchableRegion.set(x, y, x + kbdW, y + kbdH)
+                    } else {
+                        touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+                        touchableRegion.setEmpty()
+                    }
                 }
             } else {
                 contentTopInsets = EnvironmentSingleton.instance.mScreenHeight

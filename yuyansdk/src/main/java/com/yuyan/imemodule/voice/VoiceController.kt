@@ -58,7 +58,10 @@ class VoiceController(
         instance = this
         client.listener = object : BiDiVoiceClient.Listener {
             override fun onVoiceState(state: BiDiVoiceClient.VoiceState, message: String?) {
-                VoiceUiState.setRecording(state == BiDiVoiceClient.VoiceState.Recording)
+                VoiceUiState.setRecording(
+                    state == BiDiVoiceClient.VoiceState.Recording ||
+                        state == BiDiVoiceClient.VoiceState.Starting
+                )
                 onStateChanged?.invoke(
                     State(
                         recording = state == BiDiVoiceClient.VoiceState.Recording,
@@ -116,14 +119,27 @@ class VoiceController(
     /** 功能栏「语音」按钮的普通点击（TOGGLE：点一下开始、再点结束；HOLD：点击即开始） */
     fun onClick(button: VoiceButton) {
         when (modeFor(button)) {
-            InteractMode.TOGGLE -> if (client.isRecording) client.stop() else client.start()
-            InteractMode.HOLD -> client.start()
+            InteractMode.TOGGLE -> {
+                if (client.isRecording) {
+                    client.stop()
+                } else {
+                    VoiceUiState.setRecording(true) // 点击瞬间即亮起录音指示
+                    client.start()
+                }
+            }
+            InteractMode.HOLD -> {
+                VoiceUiState.setRecording(true)
+                client.start()
+            }
         }
     }
 
     /** HOLD 模式：手指按下 */
     fun onButtonDown(button: VoiceButton) {
-        if (modeFor(button) == InteractMode.HOLD) client.start()
+        if (modeFor(button) == InteractMode.HOLD) {
+            VoiceUiState.setRecording(true)
+            client.start()
+        }
     }
 
     /** HOLD 模式：手指抬起 */
