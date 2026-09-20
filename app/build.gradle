@@ -5,6 +5,7 @@ plugins {
 
 android {
     compileSdk 36
+    buildToolsVersion '36.0.0'
     namespace 'com.yuyan'
     defaultConfig {
         applicationId "com.yuyan.pinyin"

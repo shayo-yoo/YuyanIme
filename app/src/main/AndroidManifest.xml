@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 包可见性：使雨燕能绑定到「说点啥」对外导出的识别服务（Android 11+ 必需） -->
+    <queries>
+        <package android:name="com.brycewg.asrkb" />
+    </queries>
+
+    <!-- 读取公共文档目录 Documents/YuyanVoice 下的热词库/配置文件（Android 11+ 另需系统授权的“所有文件访问”） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <!-- Android 11+ 读取公共 Documents 需用户授予“所有文件访问”；安装后到系统设置里单独授权 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <application
         android:name="com.yuyan.BaseApplication"
         android:icon="@drawable/app_icon"

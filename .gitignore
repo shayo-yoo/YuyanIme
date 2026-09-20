@@ -10,3 +10,12 @@ captures/
 keystore/keystore.properties
 /.kotlin
 *.log
+
+apk����/
+
+keystore/*
+
+!keystore/keystore.properties
+
+!keystore/yuyan.jks
+apk产物/
