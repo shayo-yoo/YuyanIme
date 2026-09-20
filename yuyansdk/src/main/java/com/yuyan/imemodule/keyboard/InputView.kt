@@ -334,7 +334,10 @@ class InputView(context: Context, private val service: ImeService) : LifecycleRe
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_APOSTROPHE, KeyEvent.KEYCODE_SPACE,
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_BACK -> return true
+            // 注意：KEYCODE_BACK 绝不能在这里无条件消费！否则返回事件被 IME 吞掉，
+            // 出现“返回动画正常但页面不返回”。返回键统一交给框架默认处理
+            // （键盘显示→收键盘，未显示→放行给应用执行返回）。
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DEL -> return true
         }
         return false
     }
@@ -376,12 +379,11 @@ class InputView(context: Context, private val service: ImeService) : LifecycleRe
         return result
     }
 
-    // 系统按键只处理返回键，当点击返回键且软键盘显示时，隐藏键盘并消费事件
+    // 系统按键：一律不在这里消费，返回 false 交给框架 InputMethodService 的默认实现
+    // （框架：软键盘显示→收键盘并消费；未显示→放行给应用执行返回）。
+    // 此前在这里自行消费 KEYCODE_BACK，会把返回事件吞掉，导致“返回动画正常但页面不返回”。
     private fun processSystemKeys(event: KeyEvent): Boolean {
-        return when (event.keyCode) {
-            KeyEvent.KEYCODE_BACK -> if (service.isInputViewShown) { requestHideSelf(); true } else false
-            else -> false
-        }
+        return false
     }
 
     fun isFunctionKey(keyCode: Int): Boolean {
