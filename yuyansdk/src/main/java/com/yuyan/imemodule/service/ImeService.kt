@@ -177,7 +177,8 @@ class ImeService : InputMethodService() {
         else if (isHardwareKeyboard && ::mCandidateView.isInitialized) intArrayOf(0, 0).also {mCandidateView.mSkbRoot.getLocationInWindow(it) }
         else intArrayOf(0, 0)
         outInsets.apply {
-            if(isSoftKeyboard || !isHardwareKeyboard){
+            if(isSoftKeyboard && ::mInputView.isInitialized) {
+                // 输入视图已创建：可安全读取键盘区域
                 if(EnvironmentSingleton.instance.keyboardModeFloat) {
                     contentTopInsets = EnvironmentSingleton.instance.mScreenHeight
                     visibleTopInsets = EnvironmentSingleton.instance.mScreenHeight
@@ -198,11 +199,23 @@ class ImeService : InputMethodService() {
                         touchableRegion.setEmpty()
                     }
                 }
-            } else {
+            } else if (isSoftKeyboard || !isHardwareKeyboard) {
+                // 输入视图尚未创建（系统可能在 onCreateInputView 前回调）：退回原行为，绝不访问未初始化视图
+                contentTopInsets = y
+                visibleTopInsets = y
+                touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+                touchableRegion.setEmpty()
+            } else if (isHardwareKeyboard && ::mCandidateView.isInitialized) {
                 contentTopInsets = EnvironmentSingleton.instance.mScreenHeight
                 visibleTopInsets = EnvironmentSingleton.instance.mScreenHeight
                 touchableInsets = Insets.TOUCHABLE_INSETS_REGION
                 touchableRegion.set(x, y, x + mCandidateView.mSkbRoot.width, y + mCandidateView.mSkbRoot.height)
+            } else {
+                // 兜底：视图均未就绪时给安全默认值，绝不访问未初始化视图
+                contentTopInsets = EnvironmentSingleton.instance.mScreenHeight
+                visibleTopInsets = EnvironmentSingleton.instance.mScreenHeight
+                touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+                touchableRegion.setEmpty()
             }
         }
     }
