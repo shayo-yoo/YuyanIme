@@ -100,6 +100,10 @@ class BiDiVoiceClient(private val appContext: Context) {
     private var pendingStart = false
     private var pendingStop = false
 
+    /** 是否允许断连后自动重绑（IME 存活期间为 true；unbind 后关闭） */
+    @Volatile
+    private var autoRebind = true
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = IExternalSpeechService.Stub.asInterface(binder)
@@ -122,6 +126,13 @@ class BiDiVoiceClient(private val appContext: Context) {
                 sessionActive.set(false)
                 this@BiDiVoiceClient.sessionId.set(-1)
                 postState(VoiceState.Error, "说点啥服务已断开")
+            }
+            // 说点啥进程可能被系统杀掉：自动重绑（BIND_AUTO_CREATE 会重启它的进程），
+            // 恢复“续命”绑定，避免退后台后再也无法识别。
+            if (autoRebind) {
+                mainHandler.postDelayed({
+                    if (autoRebind && !bound.get()) bind()
+                }, 2000)
             }
         }
     }
@@ -178,6 +189,7 @@ class BiDiVoiceClient(private val appContext: Context) {
     /** 主动绑定到说点啥识别服务（幂等，绑定时忽略重复调用）。 */
     fun bind() {
         if (bound.get()) return
+        autoRebind = true
         val intent = Intent().setComponent(ComponentName(SERVICE_PACKAGE, SERVICE_CLASS))
         try {
             appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
@@ -188,6 +200,7 @@ class BiDiVoiceClient(private val appContext: Context) {
     }
 
     fun unbind() {
+        autoRebind = false
         cancelWatchdog()
         if (bound.compareAndSet(true, false)) {
             try { appContext.unbindService(connection) } catch (_: Throwable) {}

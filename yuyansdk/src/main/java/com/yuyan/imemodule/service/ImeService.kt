@@ -89,6 +89,9 @@ class ImeService : InputMethodService() {
             Thread { GlossaryStore.ensureDefaultSetup() }.start()
         } catch (_: Throwable) {
         }
+        // 持续绑定说点啥识别服务（IME 存活期间不解绑）：相当于给说点啥进程“续命”，
+        // 避免它退到后台后被系统杀掉导致“只能识别一次”（说点啥的悬浮球也是这个作用）。
+        if (::voiceController.isInitialized) voiceController.bind()
     }
 
     override fun onCreateInputView(): View {
@@ -118,6 +121,7 @@ class ImeService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        if (::voiceController.isInitialized) voiceController.unbind()
         super.onDestroy()
         removeOnChangedListener(onThemeChangeListener)
         clipboardUpdateContent.unregisterOnChangeListener(clipboardUpdateContentListener)
@@ -240,13 +244,11 @@ class ImeService : InputMethodService() {
 
     override fun onWindowShown() {
         if (isSoftKeyboard) mInputView.onWindowShown()
-        if (::voiceController.isInitialized) voiceController.bind()
         super.onWindowShown()
     }
 
     override fun onWindowHidden() {
         if (isSoftKeyboard) mInputView.onWindowHidden()
-        if (::voiceController.isInitialized) voiceController.unbind()
         super.onWindowHidden()
     }
 
