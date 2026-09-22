@@ -54,8 +54,8 @@ class HotwordSettingsFragment : Fragment() {
         root.addView(Button(context).apply {
             text = getString(R.string.hotword_create_default)
             setOnClickListener {
-                val created = GlossaryStore.ensureDefaultSetup()
-                if (created != null) {
+                val result = GlossaryStore.ensureDefaultSetup()
+                if (result.root != null) {
                     refresh()
                 } else {
                     statusText.text = getString(R.string.hotword_dir_missing)
@@ -98,24 +98,47 @@ class HotwordSettingsFragment : Fragment() {
             building = false
             return
         }
-        val names = GlossaryStore.listWordbooks()
-        if (names.isEmpty()) {
+        val sections = GlossaryStore.listSections()
+        if (sections.isEmpty()) {
             statusText.text = getString(R.string.hotword_empty)
             building = false
             return
         }
         val enabled = GlossaryStore.currentEnabledWordbooks()
-        val enabledSet = if (enabled.isEmpty()) names.toSet() else enabled.toSet()
+        val included = GlossaryStore.currentIncludeWordbooks()
+        // 名称忽略大小写匹配（配置里写词库a 也能对上 [[词库A]]）
+        fun nameHit(list: List<String>, n: String): Boolean =
+            list.any { it.trim().lowercase().removeSuffix(".txt") == n.trim().lowercase().removeSuffix(".txt") }
+        val allEnabled = enabled.isEmpty()
+        // 同名词库跨文件出现时，显示名追加（文件名）区分
+        val dupNames = sections.groupBy { it.name.trim().lowercase() }.filterValues { it.size > 1 }.keys
+        fun displayName(s: GlossaryStore.SectionRef): String =
+            if (s.name.trim().lowercase() in dupNames) "${s.name}（${s.file}）" else s.name
 
-        for (name in names) {
+        for (s in sections) {
             cbContainer.addView(CheckBox(requireContext()).apply {
-                text = name
-                isChecked = enabledSet.contains(name)
+                text = displayName(s)
+                tag = s.name           // 真实词库名（回写 enabled_wordbooks 用，不带显示后缀）
+                isChecked = allEnabled || nameHit(enabled, s.name) || nameHit(included, s.name)
                 setPadding(0, dp(4), 0, dp(4))
                 setOnCheckedChangeListener { _, _ -> onWordbookToggled() }
             })
         }
-        statusText.text = "${root.absolutePath}"
+        val onCount = cbContainer.childCount.let { c ->
+            (0 until c).count { (cbContainer.getChildAt(it) as CheckBox).isChecked }
+        }
+        val includeTip = if (included.isNotEmpty()) {
+            "\ninclude_wordbooks 强制纳入：${included.joinToString("、")}"
+        } else {
+            ""
+        }
+        val versionTip = "配置版本：v${GlossaryStore.currentConfigVersion()}（程序期望 v${GlossaryStore.CONFIG_VERSION}）"
+        val dirTip = if (GlossaryStore.candidateRootDirs().size > 1) {
+            "\n⚠ 发现多个 YuyanVoice 目录，当前使用：${root.absolutePath}\n请确认词库文件都放在这个目录里"
+        } else {
+            ""
+        }
+        statusText.text = "$versionTip\n共 ${sections.size} 个词库，已启用 $onCount 个$includeTip\n目录：${root.absolutePath}$dirTip"
         building = false
     }
 
@@ -124,7 +147,7 @@ class HotwordSettingsFragment : Fragment() {
         val checked = (0 until cbContainer.childCount)
             .map { cbContainer.getChildAt(it) as CheckBox }
             .filter { it.isChecked }
-            .map { it.text.toString() }
+            .map { (it.tag as? String) ?: it.text.toString() }
         // 全不勾时写占位名，使引擎不加载任何词库（enabled_wordbooks 为空=全部启用，故不能留空）
         val list = if (checked.isEmpty()) listOf("_none_") else checked
         if (GlossaryStore.setEnabledWordbooks(list)) {

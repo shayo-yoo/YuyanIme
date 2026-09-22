@@ -3,14 +3,15 @@ package com.yuyan.imemodule.hotword
 import net.sourceforge.pinyin4j.PinyinHelper
 
 /**
- * 发音相似度热词匹配器（M3）。
+ * 发音相似度热词匹配器（M3，匹配器接口改为手册 §4 的“返回命中区间”形式）。
  *
  * 思路（移植自 CapsWriter-Offline 的音素方案）：
  *  1. 把文本与词条都“音素化”：中文每字 → 带声调的拼音音节；英文/数字 → 原样小写；
  *  2. 在识别文本上按词条的“token 数”滑动窗口，计算窗口音素串与词条音素串的相似度；
- *  3. 相似度 ≥ 阈值时，把对应文字区间替换成词条规范写法。
+ *  3. 相似度 ≥ 阈值时，返回对应文字区间（start, end）与相似度分数（作为命中分数）。
  *
  * 相似度用“归一化编辑距离”：1 - Levenshtein(窗口音素串, 词条音素串) / 较长串长度。
+ * 过滤/选词/替换由引擎统一完成（本文档 §4），本类只负责“找发音最接近的区间”。
  */
 class PhoneticMatcher(private val threshold: Float) : HotwordEngine.HotwordMatcher {
 
@@ -19,25 +20,22 @@ class PhoneticMatcher(private val threshold: Float) : HotwordEngine.HotwordMatch
         val charEnd: Int get() = charStart + text.length
     }
 
-    override fun replace(text: String, entry: WordEntry): String {
-        if (text.isEmpty()) return text
-        // 黑名单命中任意一个，就不做这条替换（保守防误伤）
-        val blacklistHit = entry.blacklist.any { it.isNotEmpty() && text.contains(it, ignoreCase = true) }
-        if (blacklistHit) return text
+    /** 一次发音命中：区间 + 相似度 */
+    private class Match(val start: Int, val end: Int, val sim: Float)
 
-        var out = text
-        for (variant in entry.variants) {
-            if (variant.isEmpty() || variant == entry.canonical) continue
-            val matched = tryMatch(out, variant)
-            if (matched != null) {
-                out = out.substring(0, matched.first) + entry.canonical + out.substring(matched.second)
-            }
+    override fun search(entry: WordEntry, text: String): List<HotwordEngine.MatchSpan> {
+        if (text.isEmpty()) return emptyList()
+        val spans = mutableListOf<HotwordEngine.MatchSpan>()
+        for (variant in entry.aliases) {
+            if (variant.isEmpty() || variant == entry.target) continue
+            val matched = tryMatch(text, variant) ?: continue
+            spans.add(HotwordEngine.MatchSpan(matched.start, matched.end, matched.sim))
         }
-        return out
+        return spans
     }
 
-    /** 在 text 中找发音最接近 variant 的区间；找不到返回 null。返回 [start, end) 字符下标 */
-    private fun tryMatch(text: String, variant: String): Pair<Int, Int>? {
+    /** 在 text 中找发音最接近 variant 的区间；找不到返回 null。返回 [start, end) 字符下标 + 相似度 */
+    private fun tryMatch(text: String, variant: String): Match? {
         val units = toUnits(text)
         val variantUnits = toUnits(variant)
         if (units.isEmpty() || variantUnits.isEmpty()) return null
@@ -63,7 +61,7 @@ class PhoneticMatcher(private val threshold: Float) : HotwordEngine.HotwordMatch
                 }
             }
         }
-        return if (bestSim >= threshold) bestStart to bestEnd else null
+        return if (bestSim >= threshold) Match(bestStart, bestEnd, bestSim.toFloat()) else null
     }
 
     /** 文本音素化：汉字→拼音(带声调)，英文/数字→小写原文；标点跳过 */

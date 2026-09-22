@@ -84,9 +84,24 @@ class ImeService : InputMethodService() {
         voiceController = VoiceController(baseContext) { text -> commitVoiceResult(text) }
         val (holdA, holdB) = GlossaryStore.voiceInteractModes()
         voiceController.applyConfig(holdA, holdB)
-        // 后台自动确保 Documents/YuyanVoice 目录与默认配置/示例词库存在（尽力而为，失败不影响使用）
+        // 后台自动确保 Documents/YuyanVoice 目录与默认配置/示例词库存在（尽力而为，失败不影响使用）；
+        // 若配置版本过低被自动重建，提示用户去热词库设置页重新勾选生效词库
         try {
-            Thread { GlossaryStore.ensureDefaultSetup() }.start()
+            Thread {
+                val result = GlossaryStore.ensureDefaultSetup()
+                if (result.configRebuilt) {
+                    try {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            android.widget.Toast.makeText(
+                                applicationContext,
+                                "词库配置已升级到 v${GlossaryStore.CONFIG_VERSION}，请到 设置→热词库设置 重新勾选生效词库",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } catch (_: Throwable) {
+                    }
+                }
+            }.start()
         } catch (_: Throwable) {
         }
         // 持续绑定说点啥识别服务（IME 存活期间不解绑）：相当于给说点啥进程“续命”，

@@ -14,8 +14,17 @@ import java.io.File
  */
 object GlossaryStore {
 
+    /** 当前程序期望的主配置格式版本（voice_config.txt 的 config_version 字段） */
+    const val CONFIG_VERSION = 3
+
+    /** ensureDefaultSetup 的返回结果 */
+    data class SetupResult(val root: File?, val configRebuilt: Boolean)
+
     /** 解析出的默认词库根目录；找不到或过不了就返回 null */
-    fun defaultRootDir(): File? {
+    fun defaultRootDir(): File? = candidateRootDirs().firstOrNull()
+
+    /** 所有“可能是词库目录”的候选目录（按优先级排序，仅返回存在的目录） */
+    fun candidateRootDirs(): List<File> {
         val candidates = mutableListOf<File>()
         try {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -29,27 +38,53 @@ object GlossaryStore {
             }
         } catch (_: Throwable) {
         }
-        return candidates.firstOrNull { it.exists() && it.isDirectory() }
+        return candidates.filter { it.exists() && it.isDirectory() }.distinctBy { it.absolutePath }
+    }
+
+    /** 判定一个文件是否为词库文件：.txt 或无后缀（兼容手机文件管理器建出的无后缀文件），排除主配置/备份/说明 */
+    private fun isWordbookFile(f: File): Boolean {
+        if (!f.isFile) return false
+        val name = f.name
+        if (name.equals(GlossaryConfig.VOICE_CONFIG_FILE, ignoreCase = true)) return false
+        if (name.endsWith(".bak", ignoreCase = true)) return false
+        val ext = f.extension
+        return ext.isEmpty() || ext.equals("txt", ignoreCase = true)
     }
 
     /**
      * 确保词库目录与默认文件存在（不存在则创建）。
      * 首次使用时调用：自动建 Documents/YuyanVoice，并写入主配置 voice_config.txt
      * 与示例词库 wordbook_default.txt，用户即可直接开始配置。
-     * @return 词库根目录；创建失败（如未授予存储权限）返回 null
+     * 若已有配置但其 config_version 低于程序期望版本，则把旧配置备份为
+     * voice_config.v{N}.bak，再写入本版本默认配置（configRebuilt=true），
+     * 调用方可据此提示用户到热词库设置页重新勾选生效词库。
      */
-    fun ensureDefaultSetup(): File? {
+    fun ensureDefaultSetup(): SetupResult {
         val root = defaultRootDir() ?: run {
             val docs = try {
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
             } catch (_: Throwable) { null }
             val target = docs?.let { File(it, DIR_NAME) }
-            if (target == null || (!target.exists() && !target.mkdirs())) return null
+            if (target == null || (!target.exists() && !target.mkdirs())) return SetupResult(null, false)
             target
         }
         return try {
+            var rebuilt = false
             val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)
-            if (!cfgFile.isFile) {
+            if (cfgFile.isFile) {
+                val oldVersion = try {
+                    GlossaryParser.parseConfig(cfgFile.readText()).configVersion
+                } catch (t: Throwable) {
+                    0
+                }
+                if (oldVersion < CONFIG_VERSION) {
+                    val bak = File(root, "voice_config.v$oldVersion.bak")
+                    if (bak.exists()) bak.delete()
+                    cfgFile.copyTo(bak)
+                    cfgFile.writeText(DEFAULT_CONFIG_TEXT)
+                    rebuilt = true
+                }
+            } else {
                 cfgFile.writeText(DEFAULT_CONFIG_TEXT)
             }
             val sample = File(root, "wordbook_default.txt")
@@ -57,12 +92,12 @@ object GlossaryStore {
                 sample.writeText(DEFAULT_WORDBOOK_TEXT)
             }
             val readme = File(root, "README.md")
-            if (!readme.isFile) {
+            if (!readme.isFile || rebuilt) {
                 readme.writeText(DEFAULT_README_TEXT)
             }
-            root
+            SetupResult(root, rebuilt)
         } catch (t: Throwable) {
-            null
+            SetupResult(null, false)
         }
     }
 
@@ -70,25 +105,37 @@ object GlossaryStore {
         get() = listOf(
             "# YuyanVoice 语音热词库主配置（自动创建）",
             "# 词库文件放到本目录：Documents/YuyanVoice/",
+            "config_version = $CONFIG_VERSION",
+            "# 版本低于程序期望时会自动备份旧配置并重建本文件（旧配置存为 voice_config.v旧版本号.bak）",
             "enable_voice = true",
             "# 交互：tap=点按  hold=按住录音（interact_mode_a/b 可分别作用于语音识别A/B）",
             "interact_mode = tap",
             "similarity_threshold = 0.8",
             "apply_order = regex,hotword",
-            "enabled_wordbooks = default"
+            "enabled_wordbooks = 默认词库,技术词库",
+            "# 强制纳入的词库：[[词库名]] 的名字，忽略大小写；不受上方过滤；留空=不使用",
+            "include_wordbooks = "
         ).joinToString("\n") + "\n"
 
     private val DEFAULT_WORDBOOK_TEXT: String
         get() = listOf(
             "# 示例词库 wordbook_default.txt（自动创建）",
-            "# [regex] 段：正则规则，pattern = 替换结果",
-            "[regex]",
-            "毫安时 = mAh",
+            "# 用 [[词库名]] 在同一个文件里划分多个词库（名称随意，被 [[ ]] 包裹即可）",
+            "# 含 = 的行 = 旧式兼容写法：pattern = 替换结果（支持标准正则）；替换内容含 | → 近音热词",
+            "# 无 = 的行 = 手册新语法热词：目标词 | 匹配词1 | 匹配词2 [~~~ 局部黑名单] [! 全文黑名单] [+ 全文白名单] [条件词:替换词]",
             "",
-            "# [hotword] 段：规范词 = 别名1 | 别名2 | ...",
-            "[hotword]",
-            "回龙观 = 回笼灌 | 回龙灌 | 慧龙观",
-            "语音识别 = 语音试别 | 语音设别"
+            "[[默认词库]]",
+            "# 正则/精确替换",
+            "毫安时 = mAh",
+            "二零二四 = 2024",
+            "# 手册新语法热词：目标词 | 匹配词（命中任意一个 → 替换为目标词）",
+            "回龙观 | 回笼灌 | 回龙灌 | 慧龙观",
+            "语音识别 | 语音试别 | 语音设别",
+            "Claude | 克劳德 | 克劳得 | cloud ! 天气|气象 + 对话|聊天 [翻译:翻译版克劳德]",
+            "",
+            "[[技术词库]]",
+            "负一 = -1",
+            "([0-9]+)点([0-9]+) = ${'$'}1.${'$'}2"
         ).joinToString("\n") + "\n"
 
     private val DEFAULT_README_TEXT: String
@@ -103,52 +150,86 @@ object GlossaryStore {
             "Documents/YuyanVoice/",
             "├── README.md              本说明文件",
             "├── voice_config.txt       主配置（开关、交互方式、相似度阈值、启用词库）",
-            "└── wordbook_*.txt         词库文件，文件名即词库名（可随意新增/删除）",
+            "└── wordbook_*.txt         词库文件（用 [[词库名]] 在一个文件里划分多个词库）",
             "",
             "## 文件一：voice_config.txt（主配置）",
             "",
             "| 配置项 | 取值 | 说明 |",
             "|---|---|---|",
+            "| config_version | 数字 | 配置格式版本。低于程序期望版本时自动备份旧配置（voice_config.v旧版本号.bak）并重建本文件 |",
             "| enable_voice | true / false | 总开关，false 时语音按钮不识别 |",
             "| interact_mode | tap / hold | 默认交互方式：tap=点按开始、再点结束；hold=按住录音、松开结束 |",
             "| interact_mode_a | tap / hold | 只影响「语音识别A」按钮 |",
             "| interact_mode_b | tap / hold | 只影响「语音识别B」按钮 |",
             "| similarity_threshold | 0~1 小数 | 热词相似度阈值：0.8 表示与目标音相似度≥0.8 才替换；越低越宽松 |",
             "| apply_order | regex,hotword | 应用顺序：先做正则替换，再做热词替换（可写 hotword,regex 反过来） |",
-            "| enabled_wordbooks | 词库名,词库名 | 启用的词库列表（不含 .txt 后缀）。留空=全部启用；全部停用写 _none_ |",
+            "| enabled_wordbooks | 词库名,词库名 | 启用的词库列表（[[词库名]] 里的名字）。留空=全部启用；全部停用写 _none_ |",
+            "| include_wordbooks | 词库名,词库名 | 强制纳入的列表（同上，忽略大小写），不受上方 enabled 过滤；留空=不使用 |",
             "",
             "示例：",
+            "config_version = 3",
             "enable_voice = true",
             "interact_mode = tap",
             "similarity_threshold = 0.8",
             "apply_order = regex,hotword",
-            "enabled_wordbooks = default,tech",
+            "enabled_wordbooks = 默认词库,技术词库",
+            "include_wordbooks = 词库A,词库B",
             "",
-            "## 文件二：词库文件（wordbook_*.txt）",
+            "> 新加的词库为什么没生效？请检查：① 文件名最好是 .txt 结尾（没有后缀也能识别，但建议加上）；",
+            "> ② 若 enabled_wordbooks 非空，新词库需在设置页勾选，或在 include_wordbooks 里写上名字；",
+            "> ③ 改完配置后到设置页点「重启程序」。",
             "",
-            "一个文件 = 一个词库。文件里用 [段名] 分成两段：",
+            "## 文件二：词库文件（wordbook_*.txt，推荐单文件多词库）",
             "",
-            "### [regex] 段：正则替换（精确，适合数字、英文、单位）",
-            "",
-            "格式：匹配模式 = 替换结果（一行一条，支持标准正则表达式；正则写错该行会被跳过）",
+            "在同一个文件里用 `[[词库名]]` 划分多个词库（名称随意，只要被 [[ ]] 包裹；可多个文件、每个文件多个词库）。",
+            "分段逻辑从上到下：词库一 与 词库二 之间的规则属于 词库一；词库二 与 词库三 之间属于 词库二；",
+            "末尾的规则属于最后一个词库；第一个 `[[词库名]]` 之前的规则也属于第一个词库。",
             "",
             "示例：",
+            "[[默认词库]]",
             "毫安时 = mAh",
             "二零二四 = 2024",
-            "([0-9]+)点([0-9]+) = ${1}.${2}     # “3点14” → “3.14”",
-            "([0-9]+)千 = ${1}000            # “5千” → “5000”",
+            "Claude | 克劳德 | 克劳得 | cloud",
             "",
-            "### [hotword] 段：近音热词（适合人名、地名、专业词）",
+            "[[技术词库]]",
+            "负一 = -1",
+            "([0-9]+)点([0-9]+) = ${'$'}1.${'$'}2",
             "",
-            "格式：规范词 = 别名1 | 别名2 | ...",
-            "说出的声音与“别名”相似度 ≥ similarity_threshold 时，自动替换成“规范词”。",
+            "### 热词行语法（手册新语法，无等号）",
+            "",
+            "格式：`目标词 | 匹配词1 | 匹配词2 [~~~ 局部黑名单] [! 全文黑名单] [+ 全文白名单] [条件词X:替换词A1]`",
+            "",
+            "| 段 | 写法 | 效果 |",
+            "|---|---|---|",
+            "| 主表达式 | `目标词 \\| 匹配词1 \\| 匹配词2` | 第一个是目标词（默认替换结果），其余是匹配词，命中任意一个即触发 |",
+            "| 局部黑名单 | `~~~ 词1\\|词2` | 命中位置**附近**（左右各 5 个字符）出现任一词 → 该处不替换 |",
+            "| 全文黑名单 | `! 词1\\|词2` | 整句（任意位置）出现任一词 → 本规则整体失效（优先级最高） |",
+            "| 全文白名单 | `+ 词1\\|词2` | 整句必须出现至少一个词，否则本规则整体失效 |",
+            "| 条件块 | `[条件1\\|条件2:替换词]` | 整句包含条件词（| 为 OR）→ 本次替换结果改用替换词；首个命中的块生效 |",
             "",
             "示例：",
-            "回龙观 = 回笼灌 | 回龙灌 | 慧龙观",
-            "语音识别 = 语音试别 | 语音设别",
-            "陈宝国 = 陈宝果 | 陈宝锅",
+            "Claude | 克劳德 | 克劳得 | cloud ~~~ weather          # 匹配位置附近出现 weather 时不替换",
+            "启动器 | 打开应用 ! 天气|气象 + 对话|聊天               # 整句含天气/气象→不替换；必须含对话或聊天",
+            "游戏启动器 | 打开游戏 [手游|手机:手游版启动器] [端游:端游版启动器]  # 含手游/手机→替换成“手游版启动器”，含端游→“端游版启动器”",
             "",
-            "别名写得越多、越贴近口音，命中率越高；2~4 字的人名/地名效果最好。",
+            "### 旧式写法（含 =，兼容原版，行为不变）",
+            "",
+            "- `pattern = 替换结果`：正则/精确替换（支持标准正则表达式；正则写错该行会被跳过）。",
+            "- `规范词 = 别名1 | 别名2`：近音热词，说出的声音与别名相似度 ≥ similarity_threshold 时替换成规范词。",
+            "- 行尾修饰符 `!黑名单 +白名单` 与旧式 `~~~ 黑名单`（整句包含即不替换）继续支持。",
+            "",
+            "### 每个词库独立开关",
+            "",
+            "设置 → 热词库设置页会把每个 `[[词库名]]` 列成一行，可逐个勾选；",
+            "不勾选的词库，其中的所有词汇在替换时都会被跳过（替换前会检查该词库是否开启）。",
+            "",
+            "## 判定细节",
+            "",
+            "- 黑/白名单与条件判断均基于**整句原始识别文本**、**大小写不敏感**（替换结果保持书写原样）；",
+            "- 匹配无顺序性：黑/白名单词汇无论出现在句子的哪个位置都算命中；",
+            "- 全文黑名单优先级 > 全文白名单：两者都命中时按黑名单失效处理；",
+            "- 同一规则多处命中互不阻塞（区间不重叠即可）；不同规则的命中冲突时，分数/长度占优者胜出，区间不重叠；",
+            "- 局部黑名单逐命中判定（每处独立），全文黑/白名单整规则判定。",
             "",
             "## 修改后如何生效",
             "",
@@ -164,28 +245,45 @@ object GlossaryStore {
             "- 词库文件数量不影响速度，但建议只保留常用词库。"
         ).joinToString("\n") + "\n"
 
-    /** 从指定目录加载整套配置与词库；无配置/未开启/目录无效返回 null */
+    /**
+     * 从指定目录加载整套配置与词库；无配置/未开启/目录无效返回 null。
+     * 词库 = 各词库文件里 `[[词库名]]` 段（旧式无标记文件整文件算一个词库）。
+     */
     fun loadSuite(root: File): GlossarySuite? {
         val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)
         if (!cfgFile.exists() || !cfgFile.isFile) return null
         val cfg = GlossaryParser.parseConfig(cfgFile.readText())
         if (!cfg.enabled) return null
 
-        val files = root.listFiles { f: File ->
-            f.isFile && f.extension.equals("txt", ignoreCase = true) &&
-                !f.name.equals(GlossaryConfig.VOICE_CONFIG_FILE, ignoreCase = true)
-        } ?: return GlossarySuite(cfg, emptyList())
+        val files = root.listFiles { f: File -> isWordbookFile(f) }
+            ?.sortedBy { it.name }
+            ?: return GlossarySuite(cfg, emptyList())
 
-        val enabled = cfg.enabledWordbooks
-        val chosen = if (enabled.isEmpty()) {
-            files.sortedBy { it.name }
-        } else {
-            files.filter { enabled.contains(it.nameWithoutExtension) }
-                .sortedBy { enabled.indexOf(it.nameWithoutExtension).let(::ifMinus1) }
+        val all = files.flatMap { f ->
+            try {
+                GlossaryParser.parseGlossary(f.nameWithoutExtension, f.readText())
+            } catch (t: Throwable) {
+                emptyList()
+            }
         }
 
-        val glossaries = chosen.map { GlossaryParser.parseGlossary(it.nameWithoutExtension, it.readText()) }
-        return GlossarySuite(cfg, glossaries)
+        // 名称规范化：忽略大小写、去掉末尾 .txt 后缀
+        fun norm(s: String): String {
+            var n = s.trim().lowercase()
+            if (n.endsWith(".txt")) n = n.dropLast(4)
+            return n
+        }
+
+        val chosen: List<Glossary> = if (cfg.enabledWordbooks.isEmpty()) {
+            // 未配置过滤：全部词库启用
+            all
+        } else {
+            val lowerEnabled = cfg.enabledWordbooks.map(::norm).toSet()
+            val lowerIncludes = cfg.includeWordbooks.map(::norm).toSet()
+            all.filter { norm(it.name) in lowerEnabled || norm(it.name) in lowerIncludes }
+        }
+
+        return GlossarySuite(cfg, chosen)
     }
 
     /** 读取主配置里指定的交互模式（A/B 各自 null=未指定，用应用内设置） */
@@ -201,13 +299,36 @@ object GlossaryStore {
         }
     }
 
-    /** 列出词库根目录下全部词库文件名（不含主配置），按名称排序 */
-    fun listWordbooks(): List<String> {
+    /** 一个词库的引用：词库名 + 来源文件名（设置页展示用） */
+    data class SectionRef(val name: String, val file: String)
+
+    /** 列出全部词库（各文件里的 `[[词库名]]` 段；旧式无标记文件整文件算一个词库），按文件名+段序 */
+    fun listSections(): List<SectionRef> {
         val root = defaultRootDir() ?: return emptyList()
-        return root.listFiles { f: File ->
-            f.isFile && f.extension.equals("txt", ignoreCase = true) &&
-                !f.name.equals(GlossaryConfig.VOICE_CONFIG_FILE, ignoreCase = true)
-        }?.map { it.nameWithoutExtension }?.sorted() ?: emptyList()
+        return root.listFiles { f: File -> isWordbookFile(f) }
+            ?.sortedBy { it.name }
+            ?.flatMap { f ->
+                try {
+                    GlossaryParser.parseGlossary(f.nameWithoutExtension, f.readText())
+                        .filter { it.regexRules.isNotEmpty() || it.hotwords.isNotEmpty() }
+                        .map { SectionRef(it.name, f.nameWithoutExtension) }
+                } catch (t: Throwable) {
+                    emptyList()
+                }
+            }
+            ?: emptyList()
+    }
+
+    /** 当前主配置里的 config_version（读取失败/不存在返回 0） */
+    fun currentConfigVersion(): Int {
+        val root = defaultRootDir() ?: return 0
+        val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)
+        if (!cfgFile.isFile) return 0
+        return try {
+            GlossaryParser.parseConfig(cfgFile.readText()).configVersion
+        } catch (t: Throwable) {
+            0
+        }
     }
 
     /** 当前启用的词库名（来自主配置 enabled_wordbooks；为空则视为全部） */
@@ -217,6 +338,18 @@ object GlossaryStore {
         if (!cfgFile.isFile) return emptyList()
         return try {
             GlossaryParser.parseConfig(cfgFile.readText()).enabledWordbooks
+        } catch (t: Throwable) {
+            emptyList()
+        }
+    }
+
+    /** 当前强制纳入的词库名（来自主配置 include_wordbooks） */
+    fun currentIncludeWordbooks(): List<String> {
+        val root = defaultRootDir() ?: return emptyList()
+        val cfgFile = File(root, GlossaryConfig.VOICE_CONFIG_FILE)
+        if (!cfgFile.isFile) return emptyList()
+        return try {
+            GlossaryParser.parseConfig(cfgFile.readText()).includeWordbooks
         } catch (t: Throwable) {
             emptyList()
         }
@@ -260,8 +393,6 @@ object GlossaryStore {
             false
         }
     }
-
-    private fun ifMinus1(i: Int): Int = i.takeIf { it >= 0 } ?: Int.MAX_VALUE
 
     const val DIR_NAME = "YuyanVoice"
 }
